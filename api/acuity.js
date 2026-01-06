@@ -1,5 +1,3 @@
-const fetch = require("node-fetch"); // Needed for Node <18. Vercel Node 18+ has fetch built-in.
-
 module.exports = async function handler(req, res) {
   try {
     // Only allow POST requests
@@ -9,7 +7,6 @@ module.exports = async function handler(req, res) {
 
     const data = req.body;
 
-    // Basic debug logging
     console.log("Webhook payload from Acuity:", data);
 
     // Map data from Acuity webhook
@@ -36,7 +33,7 @@ module.exports = async function handler(req, res) {
       ]
     };
 
-    // POST to Smartsheet
+    // Use built-in fetch
     const response = await fetch(
       `https://api.smartsheet.com/2.0/sheets/${process.env.SHEET_ID}/rows`,
       {
