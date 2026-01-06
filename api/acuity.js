@@ -1,74 +1,43 @@
-export default async function handler(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).send("Method Not Allowed");
-  }
+const fetch = require("node-fetch"); // Needed for Node <18. Vercel Node 18+ has fetch built-in.
 
+module.exports = async function handler(req, res) {
   try {
+    // Only allow POST requests
+    if (req.method !== "POST") {
+      return res.status(405).send("Method Not Allowed");
+    }
+
     const data = req.body;
 
-    if (!data.id) {
-      return res.status(400).send("Missing appointment id in webhook");
-    }
+    // Basic debug logging
+    console.log("Webhook payload from Acuity:", data);
 
-    const appointmentId = data.id;
+    // Map data from Acuity webhook
+    const appointmentId = data.id || "";
+    const name = `${data.firstName || ""} ${data.lastName || ""}`.trim();
+    const email = data.email || "";
+    const phone = data.phone || "";
+    const date = data.date || "";
+    const time = data.time || "";
+    const service = data.type || "";
 
-    // Fetch full appointment from Acuity
-    const acuityResponse = await fetch(
-      `https://acuityscheduling.com/api/v1/appointments/${appointmentId}`,
-      {
-        headers: {
-          "Authorization": `Basic ${Buffer.from(
-            process.env.ACUITY_USER + ":" + process.env.ACUITY_KEY
-          ).toString("base64")}`,
-          "Content-Type": "application/json"
-        }
-      }
-    );
+    // Construct body for Smartsheet API
+    const smartsheetBody = {
+      toBottom: true,
+      cells: [
+        { columnId: Number(process.env.COL_APPT_ID), value: appointmentId },
+        { columnId: Number(process.env.COL_NAME), value: name },
+        { columnId: Number(process.env.COL_EMAIL), value: email },
+        { columnId: Number(process.env.COL_PHONE), value: phone },
+        { columnId: Number(process.env.COL_DATE), value: date },
+        { columnId: Number(process.env.COL_TIME), value: time },
+        { columnId: Number(process.env.COL_SERVICE), value: service },
+        { columnId: Number(process.env.COL_STATUS), value: "Scheduled" }
+      ]
+    };
 
-    if (!acuityResponse.ok) {
-      const err = await acuityResponse.text();
-      console.error("Error fetching appointment:", err);
-      return res.status(500).send(`Error fetching appointment: ${err}`);
-    }
-
-    const appointment = await acuityResponse.json();
-
-    // Safely extract data
-    const getSafe = (value) => (value === null || value === undefined ? "" : value);
-
-    const name = `${getSafe(appointment.firstName)} ${getSafe(appointment.lastName)}`;
-    const email = getSafe(appointment.email);
-    const phone = getSafe(appointment.phone);
-    const date = getSafe(appointment.date);
-    const time = getSafe(appointment.time);
-    const service = getSafe(appointment.type);
-
-    console.log("Posting to Smartsheet:", { appointmentId, name, email, phone, date, time, service });
-
-    // Build cells dynamically and only if column IDs exist
-    const cells = [];
-
-    const columns = [
-      { env: "COL_APPT_ID", value: appointmentId },
-      { env: "COL_NAME", value: name },
-      { env: "COL_EMAIL", value: email },
-      { env: "COL_PHONE", value: phone },
-      { env: "COL_DATE", value: date },
-      { env: "COL_TIME", value: time },
-      { env: "COL_SERVICE", value: service },
-      { env: "COL_STATUS", value: "Scheduled" }
-    ];
-
-    columns.forEach((col) => {
-      const colId = Number(process.env[col.env]);
-      if (!isNaN(colId)) {
-        cells.push({ columnId: colId, value: col.value });
-      } else {
-        console.warn(`Column ID for ${col.env} is invalid, skipping`);
-      }
-    });
-
-    const smartsheetResponse = await fetch(
+    // POST to Smartsheet
+    const response = await fetch(
       `https://api.smartsheet.com/2.0/sheets/${process.env.SHEET_ID}/rows`,
       {
         method: "POST",
@@ -76,14 +45,21 @@ export default async function handler(req, res) {
           "Authorization": `Bearer ${process.env.SMARTSHEET_TOKEN}`,
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({
-          toBottom: true,
-          cells
-        })
+        body: JSON.stringify(smartsheetBody)
       }
     );
 
-    if (!smartsheetResponse.ok) {
-      const errorText = await smartsheetResponse.text();
+    if (!response.ok) {
+      const errorText = await response.text();
       console.error("Smartsheet API error:", errorText);
-      return res.status(500).send(`Smarts
+      return res.status(500).send(`Smartsheet API error: ${errorText}`);
+    }
+
+    console.log("Row added successfully to Smartsheet!");
+    res.status(200).send("OK");
+
+  } catch (error) {
+    console.error("Unexpected error in handler:", error);
+    res.status(500).send(`Internal Server Error: ${error.message}`);
+  }
+};
