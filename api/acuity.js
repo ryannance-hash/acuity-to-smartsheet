@@ -6,19 +6,19 @@ export default async function handler(req, res) {
   try {
     const data = req.body;
 
-    // Make sure we have all required fields
-    if (!data.id || !data.firstName || !data.lastName) {
-      return res.status(400).send("Missing appointment data");
-    }
+    // --- Debug logs ---
+    console.log("Webhook payload from Acuity:", data);
 
+    // --- Extract Acuity fields ---
     const appointmentId = data.id;
-    const name = `${data.firstName} ${data.lastName}`;
+    const name = `${data.firstName || ""} ${data.lastName || ""}`;
     const email = data.email || "";
     const phone = data.phone || "";
     const date = data.date || "";
     const time = data.time || "";
     const service = data.type || "";
 
+    // --- Prepare Smartsheet request body ---
     const body = {
       toBottom: true,
       cells: [
@@ -26,13 +26,16 @@ export default async function handler(req, res) {
         { columnId: parseInt(process.env.COL_NAME), value: name },
         { columnId: parseInt(process.env.COL_EMAIL), value: email },
         { columnId: parseInt(process.env.COL_PHONE), value: phone },
-        { columnId: parseInt(process.env.COL_DATE), value: date },
-        { columnId: parseInt(process.env.COL_TIME), value: time },
+        { columnId: parseInt(process.env.COL_DATE), value: date },       // format YYYY-MM-DD
+        { columnId: parseInt(process.env.COL_TIME), value: time },       // format HH:mm:ss
         { columnId: parseInt(process.env.COL_SERVICE), value: service },
         { columnId: parseInt(process.env.COL_STATUS), value: "Scheduled" }
       ]
     };
 
+    console.log("Smartsheet request body:", JSON.stringify(body, null, 2));
+
+    // --- Send to Smartsheet ---
     const response = await fetch(
       `https://api.smartsheet.com/2.0/sheets/${process.env.SHEET_ID}/rows`,
       {
@@ -46,10 +49,12 @@ export default async function handler(req, res) {
     );
 
     if (!response.ok) {
-      const errorText = await response.text();
-      return res.status(500).send(`Smartsheet API error: ${errorText}`);
+      const text = await response.text();
+      console.error("Smartsheet API error:", text);
+      return res.status(500).send(`Smartsheet API error: ${text}`);
     }
 
+    console.log("Appointment successfully added to Smartsheet!");
     res.status(200).send("Appointment added to Smartsheet!");
   } catch (error) {
     console.error("Server error:", error);
