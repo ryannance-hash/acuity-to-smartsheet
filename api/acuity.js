@@ -1,84 +1,68 @@
-// api/acuity.js
+import fetch from "node-fetch";
 
 export default async function handler(req, res) {
   try {
-    if (req.method !== "POST") {
-      return res.status(405).send("Method Not Allowed");
-    }
+    // 1️⃣ Get the webhook payload from Acuity
+    const acuityData = req.body;
+    console.log("Webhook payload from Acuity:", acuityData);
 
-    const webhookData = req.body;
-    console.log("Webhook payload from Acuity:", webhookData);
-
-    const appointmentId = webhookData.id;
-    if (!appointmentId) {
-      return res.status(400).send("Missing appointment ID in webhook");
-    }
-
-    // Fetch full appointment details from Acuity
-    const ACUITY_USER = process.env.ACUITY_USER;
-    const ACUITY_KEY = process.env.ACUITY_KEY;
-
-    const acuityResponse = await fetch(
-      `https://acuityscheduling.com/api/v1/appointments/${appointmentId}`,
-      {
-        headers: {
-          Authorization:
-            "Basic " + Buffer.from(`${ACUITY_USER}:${ACUITY_KEY}`).toString("base64"),
-          "Content-Type": "application/json",
-        },
-      }
-    );
-
-    if (!acuityResponse.ok) {
-      const errText = await acuityResponse.text();
-      console.error("Error fetching Acuity appointment:", errText);
-      return res.status(500).send(`Acuity API error: ${errText}`);
-    }
-
-    const appointment = await acuityResponse.json();
-    console.log("Full appointment details:", appointment);
-
-    // Map appointment data to Smartsheet row
-    const smartsheetBody = {
-      toBottom: true,
-      cells: [
-        { columnId: Number(process.env.COL_APPT_ID), value: appointment.id },
-        {
-          columnId: Number(process.env.COL_NAME),
-          value: `${appointment.firstName || ""} ${appointment.lastName || ""}`.trim(),
-        },
-        { columnId: Number(process.env.COL_EMAIL), value: appointment.email || "" },
-        { columnId: Number(process.env.COL_PHONE), value: appointment.phone || "" },
-        { columnId: Number(process.env.COL_DATE), value: appointment.date || "" },
-        { columnId: Number(process.env.COL_TIME), value: appointment.time || "" },
-        { columnId: Number(process.env.COL_SERVICE), value: appointment.type || "" },
-        { columnId: Number(process.env.COL_STATUS), value: "Scheduled" },
-      ],
+    // 2️⃣ Map the fields we want from Acuity
+    const rowData = {
+      "Acuity Appt ID": acuityData.id,
+      "Associate Name": `${acuityData.firstName} ${acuityData.lastName}`,
+      "Email Address": acuityData.email,
+      "Phone Number": acuityData.phone,
+      "OB Calendar": acuityData.date,
+      "Appt Time": acuityData.time,
+      "Acuity Appt Type": acuityData.type,
+      "Acuity Status": acuityData.action
     };
 
-    // Insert into Smartsheet
-    const smartsheetResponse = await fetch(
-      `https://api.smartsheet.com/2.0/sheets/${process.env.SHEET_ID}/rows`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${process.env.SMARTSHEET_TOKEN}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(smartsheetBody),
+    // 3️⃣ Get the sheet columns dynamically
+    const sheetId = process.env.SHEET_ID;
+    const smartsheetResp = await fetch(`https://api.smartsheet.com/2.0/sheets/${sheetId}`, {
+      headers: {
+        Authorization: `Bearer ${process.env.SMARTSHEET_TOKEN}`,
+        "Content-Type": "application/json"
       }
-    );
+    });
+    const sheetData = await smartsheetResp.json();
 
-    if (!smartsheetResponse.ok) {
-      const errorText = await smartsheetResponse.text();
-      console.error("Smartsheet API error:", errorText);
-      return res.status(500).send(`Smartsheet API error: ${errorText}`);
-    }
+    // Build a map: column title -> column id
+    const columnMap = {};
+    sheetData.columns.forEach(col => {
+      columnMap[col.title] = col.id;
+    });
+    console.log("Column map:", columnMap);
 
-    console.log("Row added successfully to Smartsheet!");
-    return res.status(200).send("OK");
+    // 4️⃣ Convert Acuity data to Smartsheet row format
+    const smartsheetRow = {
+      toTop: true,
+      cells: Object.entries(rowData).map(([title, value]) => {
+        const columnId = columnMap[title];
+        if (!columnId) {
+          console.warn(`⚠️ Column "${title}" not found on sheet`);
+        }
+        return { columnId, value };
+      }).filter(cell => cell.columnId) // only include cells with valid column IDs
+    };
+
+    // 5️⃣ Insert row into Smartsheet
+    const addRowResp = await fetch(`https://api.smartsheet.com/2.0/sheets/${sheetId}/rows`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.SMARTSHEET_TOKEN}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify([smartsheetRow])
+    });
+
+    const addRowData = await addRowResp.json();
+    console.log("Smartsheet row added:", addRowData);
+
+    res.status(200).json({ success: true, data: addRowData });
   } catch (error) {
-    console.error("Unexpected error in handler:", error);
-    return res.status(500).send(`Internal Server Error: ${error.message}`);
+    console.error("Error inserting into Smartsheet:", error);
+    res.status(500).json({ success: false, error: error.message });
   }
 }
