@@ -1,89 +1,76 @@
-// api/acuity.js
-import fetch from 'node-fetch';
-import Smartsheet from 'smartsheet';
+// acuity.js
+// Vercel Serverless Function for Acuity Webhook → Smartsheet
 
-const smartsheet = new Smartsheet({
+import Smartsheet from "smartsheet";
+
+// Smartsheet client
+const smartsheet = Smartsheet.createClient({
   accessToken: process.env.SMARTSHEET_TOKEN
 });
 
-const SHEET_ID = process.env.SHEET_ID;
-
-// Column mapping in Smartsheet
-const COLUMN_MAP = {
-  COL_APPT_ID: 'Acuity Appt ID',
-  COL_NAME: 'Associate Name',
-  COL_EMAIL: 'Email Address',
-  COL_PHONE: 'Phone Number',
-  COL_DATE: 'OB Calendar',
-  COL_TIME: 'Appt Time',
-  COL_SERVICE: 'Acuity Appt Type',
-  COL_STATUS: 'Acuity Status'
+// Set your sheet and column IDs here
+const SHEET_ID = 1316374212202372;
+const COLUMNS = {
+  COL_APPT_ID: 3021801339506, // Acuity Appt ID
+  COL_NAME: 3021769821064,
+  COL_EMAIL: 3021717024246,
+  COL_PHONE: 3021717024247,
+  COL_DATE: 3021685402001,
+  COL_TIME: 3021780670963,
+  COL_SERVICE: 3021769170800,
+  COL_STATUS: 3021808046793
 };
 
-// Helper: find Smartsheet column ID by title
-async function getColumnIds(sheetId) {
-  const sheet = await smartsheet.sheets.getSheet({ id: sheetId });
-  const columns = {};
-  sheet.columns.forEach(col => {
-    for (const key in COLUMN_MAP) {
-      if (col.title === COLUMN_MAP[key]) {
-        columns[key] = col.id;
-      }
-    }
-  });
-  return columns;
-}
-
-// Vercel handler
+// Vercel Serverless Function handler
 export default async function handler(req, res) {
   try {
+    if (req.method !== "POST") {
+      return res.status(405).send("Method Not Allowed");
+    }
+
     const payload = req.body;
+    console.log("Webhook payload from Acuity:", payload);
 
-    console.log('Webhook payload from Acuity:', payload);
+    // Fetch full appointment details from Acuity API
+    const ACUITY_KEY = process.env.ACUITY_API_KEY;
+    const ACUITY_USER = process.env.ACUITY_API_USER;
 
-    // Fetch full appointment details from Acuity
-    const acuityResponse = await fetch(
-      `https://acuityscheduling.com/api/v1/appointments/${payload.id}`,
-      {
-        headers: {
-          'Authorization': 'Basic ' + Buffer.from(`${process.env.ACUITY_KEY}:`).toString('base64')
-        }
+    const acuityRes = await fetch(`https://acuityscheduling.com/api/v1/appointments/${payload.id}`, {
+      headers: {
+        Authorization: `Basic ${Buffer.from(`${ACUITY_USER}:${ACUITY_KEY}`).toString("base64")}`
       }
-    );
+    });
 
-    const appointment = await acuityResponse.json();
-    console.log('Full appointment details:', appointment);
+    if (!acuityRes.ok) {
+      console.error("Error fetching appointment from Acuity:", await acuityRes.text());
+      return res.status(500).send("Failed to fetch Acuity appointment");
+    }
 
-    // Get current column IDs from Smartsheet
-    const columnIds = await getColumnIds(SHEET_ID);
-    console.log('Column IDs:', columnIds);
+    const appointment = await acuityRes.json();
+    console.log("Full appointment details:", appointment);
 
-    // Prepare row data
-    const newRow = {
+    // Prepare row to add/update in Smartsheet
+    const row = {
       toTop: true,
       cells: [
-        { columnId: columnIds.COL_APPT_ID, value: appointment.id },
-        { columnId: columnIds.COL_NAME, value: `${appointment.firstName} ${appointment.lastName}` },
-        { columnId: columnIds.COL_EMAIL, value: appointment.email },
-        { columnId: columnIds.COL_PHONE, value: appointment.phone },
-        { columnId: columnIds.COL_DATE, value: appointment.date },
-        { columnId: columnIds.COL_TIME, value: appointment.time },
-        { columnId: columnIds.COL_SERVICE, value: appointment.type },
-        { columnId: columnIds.COL_STATUS, value: appointment.action }
+        { columnId: COLUMNS.COL_APPT_ID, value: appointment.id.toString() },
+        { columnId: COLUMNS.COL_NAME, value: `${appointment.firstName} ${appointment.lastName}` },
+        { columnId: COLUMNS.COL_EMAIL, value: appointment.email },
+        { columnId: COLUMNS.COL_PHONE, value: appointment.phone },
+        { columnId: COLUMNS.COL_DATE, value: appointment.date },
+        { columnId: COLUMNS.COL_TIME, value: appointment.time },
+        { columnId: COLUMNS.COL_SERVICE, value: appointment.type },
+        { columnId: COLUMNS.COL_STATUS, value: appointment.canceled ? "Canceled" : "Scheduled" }
       ]
     };
 
     // Add row to Smartsheet
-    const addedRow = await smartsheet.sheets.addRows({
-      sheetId: SHEET_ID,
-      body: [newRow]
-    });
+    const response = await smartsheet.sheets.addRows({ sheetId: SHEET_ID, body: [row] });
+    console.log("Smartsheet response:", response);
 
-    console.log('Added row to Smartsheet:', addedRow);
-
-    res.status(200).send('OK');
+    res.status(200).send("Appointment synced to Smartsheet");
   } catch (err) {
-    console.error('Error processing webhook:', err);
-    res.status(500).json({ error: err.message });
+    console.error("Error in handler:", err);
+    res.status(500).send("Internal Server Error");
   }
 }
