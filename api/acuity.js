@@ -1,25 +1,22 @@
 module.exports = async function handler(req, res) {
   try {
-    // Only allow POST requests
     if (req.method !== "POST") {
       return res.status(405).send("Method Not Allowed");
     }
 
-    // ---- Safely parse webhook body (Vercel-safe) ----
+    // ---- Parse body safely ----
     let data = req.body;
-
-    if (typeof req.body === "string") {
+    if (typeof data === "string") {
       try {
-        data = JSON.parse(req.body);
-      } catch (err) {
-        console.error("Failed to parse request body:", err);
+        data = JSON.parse(data);
+      } catch {
         data = {};
       }
     }
 
-    console.log("Webhook payload from Acuity:", data);
+    console.log("Webhook payload:", data);
 
-    // ---- Map Acuity webhook fields defensively ----
+    // ---- Map webhook fields ----
     const appointmentId = data.id || data.appointmentId || "";
     const name = `${data.first_name || data.firstName || ""} ${data.last_name || data.lastName || ""}`.trim();
     const email = data.email || "";
@@ -28,24 +25,39 @@ module.exports = async function handler(req, res) {
     const time = data.time || "";
     const service = data.appointmentType || data.type || "";
 
-    // ---- Build Smartsheet rows payload (MUST be an array) ----
+    // ---- Column map (IMPORTANT for debugging) ----
+    const columns = {
+      COL_APPT_ID: process.env.COL_APPT_ID,
+      COL_NAME: process.env.COL_NAME,
+      COL_EMAIL: process.env.COL_EMAIL,
+      COL_PHONE: process.env.COL_PHONE,
+      COL_DATE: process.env.COL_DATE,
+      COL_TIME: process.env.COL_TIME,
+      COL_SERVICE: process.env.COL_SERVICE,
+      COL_STATUS: process.env.COL_STATUS
+    };
+
+    console.log("Column ID map:", columns);
+    console.log("Sheet ID:", process.env.SHEET_ID);
+
+    // ---- Smartsheet payload (array REQUIRED) ----
     const smartsheetBody = [
       {
         toBottom: true,
         cells: [
-          { columnId: process.env.COL_APPT_ID, value: appointmentId },
-          { columnId: process.env.COL_NAME, value: name },
-          { columnId: process.env.COL_EMAIL, value: email },
-          { columnId: process.env.COL_PHONE, value: phone },
-          { columnId: process.env.COL_DATE, value: date },
-          { columnId: process.env.COL_TIME, value: time },
-          { columnId: process.env.COL_SERVICE, value: service },
-          { columnId: process.env.COL_STATUS, value: "Scheduled" }
+          { columnId: columns.COL_APPT_ID, value: appointmentId },
+          { columnId: columns.COL_NAME, value: name },
+          { columnId: columns.COL_EMAIL, value: email },
+          { columnId: columns.COL_PHONE, value: phone },
+          { columnId: columns.COL_DATE, value: date },
+          { columnId: columns.COL_TIME, value: time },
+          { columnId: columns.COL_SERVICE, value: service },
+          { columnId: columns.COL_STATUS, value: "Scheduled" }
         ]
       }
     ];
 
-    // ---- Send row to Smartsheet ----
+    // ---- Send to Smartsheet ----
     const response = await fetch(
       `https://api.smartsheet.com/2.0/sheets/${process.env.SHEET_ID}/rows`,
       {
@@ -59,16 +71,4 @@ module.exports = async function handler(req, res) {
     );
 
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error("Smartsheet API error:", errorText);
-      return res.status(500).send(`Smartsheet API error: ${errorText}`);
-    }
-
-    console.log("Row successfully added to Smartsheet");
-    return res.status(200).send("OK");
-
-  } catch (error) {
-    console.error("Unexpected error:", error);
-    return res.status(500).send(`Internal Server Error: ${error.message}`);
-  }
-};
+      const
