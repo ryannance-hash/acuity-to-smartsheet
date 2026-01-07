@@ -1,7 +1,6 @@
 // api/acuity.js
-const fetch = require("node-fetch");
 
-module.exports = async function handler(req, res) {
+export default async function handler(req, res) {
   try {
     if (req.method !== "POST") {
       return res.status(405).send("Method Not Allowed");
@@ -10,7 +9,6 @@ module.exports = async function handler(req, res) {
     const webhookData = req.body;
     console.log("Webhook payload from Acuity:", webhookData);
 
-    // Make sure we have an appointment ID
     const appointmentId = webhookData.id;
     if (!appointmentId) {
       return res.status(400).send("Missing appointment ID in webhook");
@@ -19,13 +17,15 @@ module.exports = async function handler(req, res) {
     // Fetch full appointment details from Acuity
     const ACUITY_USER = process.env.ACUITY_USER;
     const ACUITY_KEY = process.env.ACUITY_KEY;
+
     const acuityResponse = await fetch(
       `https://acuityscheduling.com/api/v1/appointments/${appointmentId}`,
       {
         headers: {
-          Authorization: "Basic " + Buffer.from(`${ACUITY_USER}:${ACUITY_KEY}`).toString("base64"),
-          "Content-Type": "application/json"
-        }
+          Authorization:
+            "Basic " + Buffer.from(`${ACUITY_USER}:${ACUITY_KEY}`).toString("base64"),
+          "Content-Type": "application/json",
+        },
       }
     );
 
@@ -43,14 +43,17 @@ module.exports = async function handler(req, res) {
       toBottom: true,
       cells: [
         { columnId: Number(process.env.COL_APPT_ID), value: appointment.id },
-        { columnId: Number(process.env.COL_NAME), value: `${appointment.firstName || ""} ${appointment.lastName || ""}`.trim() },
+        {
+          columnId: Number(process.env.COL_NAME),
+          value: `${appointment.firstName || ""} ${appointment.lastName || ""}`.trim(),
+        },
         { columnId: Number(process.env.COL_EMAIL), value: appointment.email || "" },
         { columnId: Number(process.env.COL_PHONE), value: appointment.phone || "" },
         { columnId: Number(process.env.COL_DATE), value: appointment.date || "" },
         { columnId: Number(process.env.COL_TIME), value: appointment.time || "" },
         { columnId: Number(process.env.COL_SERVICE), value: appointment.type || "" },
-        { columnId: Number(process.env.COL_STATUS), value: "Scheduled" }
-      ]
+        { columnId: Number(process.env.COL_STATUS), value: "Scheduled" },
+      ],
     };
 
     // Insert into Smartsheet
@@ -60,9 +63,9 @@ module.exports = async function handler(req, res) {
         method: "POST",
         headers: {
           Authorization: `Bearer ${process.env.SMARTSHEET_TOKEN}`,
-          "Content-Type": "application/json"
+          "Content-Type": "application/json",
         },
-        body: JSON.stringify(smartsheetBody)
+        body: JSON.stringify(smartsheetBody),
       }
     );
 
@@ -74,9 +77,8 @@ module.exports = async function handler(req, res) {
 
     console.log("Row added successfully to Smartsheet!");
     return res.status(200).send("OK");
-
   } catch (error) {
     console.error("Unexpected error in handler:", error);
     return res.status(500).send(`Internal Server Error: ${error.message}`);
   }
-};
+}
