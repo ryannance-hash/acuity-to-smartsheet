@@ -5,7 +5,7 @@ module.exports = async function handler(req, res) {
       return res.status(405).send("Method Not Allowed");
     }
 
-    // --- Safely parse webhook body (Vercel-safe) ---
+    // ---- Safely parse webhook body (Vercel-safe) ----
     let data = req.body;
 
     if (typeof req.body === "string") {
@@ -19,7 +19,7 @@ module.exports = async function handler(req, res) {
 
     console.log("Webhook payload from Acuity:", data);
 
-    // --- Map Acuity webhook fields defensively ---
+    // ---- Map Acuity webhook fields defensively ----
     const appointmentId = data.id || data.appointmentId || "";
     const name = `${data.first_name || data.firstName || ""} ${data.last_name || data.lastName || ""}`.trim();
     const email = data.email || "";
@@ -28,24 +28,24 @@ module.exports = async function handler(req, res) {
     const time = data.time || "";
     const service = data.appointmentType || data.type || "";
 
-    // --- Build Smartsheet rows payload (MUST be an array) ---
+    // ---- Build Smartsheet rows payload (MUST be an array) ----
     const smartsheetBody = [
       {
         toBottom: true,
         cells: [
-          { columnId: Number(process.env.COL_APPT_ID), value: appointmentId },
-          { columnId: Number(process.env.COL_NAME), value: name },
-          { columnId: Number(process.env.COL_EMAIL), value: email },
-          { columnId: Number(process.env.COL_PHONE), value: phone },
-          { columnId: Number(process.env.COL_DATE), value: date },
-          { columnId: Number(process.env.COL_TIME), value: time },
-          { columnId: Number(process.env.COL_SERVICE), value: service },
-          { columnId: Number(process.env.COL_STATUS), value: "Scheduled" }
+          { columnId: process.env.COL_APPT_ID, value: appointmentId },
+          { columnId: process.env.COL_NAME, value: name },
+          { columnId: process.env.COL_EMAIL, value: email },
+          { columnId: process.env.COL_PHONE, value: phone },
+          { columnId: process.env.COL_DATE, value: date },
+          { columnId: process.env.COL_TIME, value: time },
+          { columnId: process.env.COL_SERVICE, value: service },
+          { columnId: process.env.COL_STATUS, value: "Scheduled" }
         ]
       }
     ];
 
-    // --- Send row to Smartsheet ---
+    // ---- Send row to Smartsheet ----
     const response = await fetch(
       `https://api.smartsheet.com/2.0/sheets/${process.env.SHEET_ID}/rows`,
       {
