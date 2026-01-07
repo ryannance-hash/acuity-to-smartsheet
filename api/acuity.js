@@ -5,31 +5,21 @@ module.exports = async function handler(req, res) {
       return res.status(405).send("Method Not Allowed");
     }
 
-    // ---- Safely parse webhook body ----
-    let data = req.body;
-
-    if (typeof data === "string") {
-      try {
-        data = JSON.parse(data);
-      } catch (err) {
-        console.error("Failed to parse JSON body:", err);
-        data = {};
-      }
-    }
+    const data = req.body;
 
     console.log("Webhook payload from Acuity:", data);
 
-    // ---- Map Acuity fields defensively ----
-    const appointmentId = data.id || data.appointmentId || "";
-    const name = `${data.first_name || data.firstName || ""} ${data.last_name || data.lastName || ""}`.trim();
+    // Map data from Acuity webhook
+    const appointmentId = data.id || "";
+    const name = `${data.firstName || ""} ${data.lastName || ""}`.trim();
     const email = data.email || "";
     const phone = data.phone || "";
     const date = data.date || "";
     const time = data.time || "";
-    const service = data.appointmentType || data.type || "";
+    const service = data.type || "";
 
-    // ---- Column ID map (for debugging) ----
-    const columns = {
+    // Log environment variables to verify
+    console.log("Column IDs:", {
       COL_APPT_ID: process.env.COL_APPT_ID,
       COL_NAME: process.env.COL_NAME,
       COL_EMAIL: process.env.COL_EMAIL,
@@ -38,35 +28,31 @@ module.exports = async function handler(req, res) {
       COL_TIME: process.env.COL_TIME,
       COL_SERVICE: process.env.COL_SERVICE,
       COL_STATUS: process.env.COL_STATUS
-    };
-
-    console.log("Column IDs:", columns);
+    });
     console.log("Sheet ID:", process.env.SHEET_ID);
 
-    // ---- Build Smartsheet rows payload (ARRAY REQUIRED) ----
-    const smartsheetBody = [
-      {
-        toBottom: true,
-        cells: [
-          { columnId: columns.COL_APPT_ID, value: appointmentId },
-          { columnId: columns.COL_NAME, value: name },
-          { columnId: columns.COL_EMAIL, value: email },
-          { columnId: columns.COL_PHONE, value: phone },
-          { columnId: columns.COL_DATE, value: date },
-          { columnId: columns.COL_TIME, value: time },
-          { columnId: columns.COL_SERVICE, value: service },
-          { columnId: columns.COL_STATUS, value: "Scheduled" }
-        ]
-      }
-    ];
+    // Construct body for Smartsheet API
+    const smartsheetBody = {
+      toBottom: true,
+      cells: [
+        { columnId: process.env.COL_APPT_ID, value: appointmentId },
+        { columnId: process.env.COL_NAME, value: name },
+        { columnId: process.env.COL_EMAIL, value: email },
+        { columnId: process.env.COL_PHONE, value: phone },
+        { columnId: process.env.COL_DATE, value: date },
+        { columnId: process.env.COL_TIME, value: time },
+        { columnId: process.env.COL_SERVICE, value: service },
+        { columnId: process.env.COL_STATUS, value: "Scheduled" }
+      ]
+    };
 
-    // ---- Send to Smartsheet ----
+    // Send request to Smartsheet
     const response = await fetch(
       `https://api.smartsheet.com/2.0/sheets/${process.env.SHEET_ID}/rows`,
       {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${process.env.SMARTSHEET_TOKEN}`,
+          "Authorization": `Bearer ${process.env.SMARTSHEET_TOKEN}`,
           "Content-Type": "application/json"
         },
         body: JSON.stringify(smartsheetBody)
@@ -76,14 +62,14 @@ module.exports = async function handler(req, res) {
     if (!response.ok) {
       const errorText = await response.text();
       console.error("Smartsheet API error:", errorText);
-      return res.status(500).send(errorText);
+      return res.status(500).send(`Smartsheet API error: ${errorText}`);
     }
 
-    console.log("Row added successfully to Smartsheet");
-    return res.status(200).send("OK");
+    console.log("Row added successfully to Smartsheet!");
+    res.status(200).send("OK");
 
   } catch (error) {
-    console.error("Unexpected error:", error);
-    return res.status(500).send(error.message);
+    console.error("Unexpected error in handler:", error);
+    res.status(500).send(`Internal Server Error: ${error.message}`);
   }
 };
