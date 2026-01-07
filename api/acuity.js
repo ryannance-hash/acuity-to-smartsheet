@@ -1,22 +1,25 @@
 module.exports = async function handler(req, res) {
   try {
+    // Only allow POST requests
     if (req.method !== "POST") {
       return res.status(405).send("Method Not Allowed");
     }
 
-    // ---- Parse body safely ----
+    // ---- Safely parse webhook body ----
     let data = req.body;
+
     if (typeof data === "string") {
       try {
         data = JSON.parse(data);
-      } catch {
+      } catch (err) {
+        console.error("Failed to parse JSON body:", err);
         data = {};
       }
     }
 
-    console.log("Webhook payload:", data);
+    console.log("Webhook payload from Acuity:", data);
 
-    // ---- Map webhook fields ----
+    // ---- Map Acuity fields defensively ----
     const appointmentId = data.id || data.appointmentId || "";
     const name = `${data.first_name || data.firstName || ""} ${data.last_name || data.lastName || ""}`.trim();
     const email = data.email || "";
@@ -25,7 +28,7 @@ module.exports = async function handler(req, res) {
     const time = data.time || "";
     const service = data.appointmentType || data.type || "";
 
-    // ---- Column map (IMPORTANT for debugging) ----
+    // ---- Column ID map (for debugging) ----
     const columns = {
       COL_APPT_ID: process.env.COL_APPT_ID,
       COL_NAME: process.env.COL_NAME,
@@ -37,10 +40,10 @@ module.exports = async function handler(req, res) {
       COL_STATUS: process.env.COL_STATUS
     };
 
-    console.log("Column ID map:", columns);
+    console.log("Column IDs:", columns);
     console.log("Sheet ID:", process.env.SHEET_ID);
 
-    // ---- Smartsheet payload (array REQUIRED) ----
+    // ---- Build Smartsheet rows payload (ARRAY REQUIRED) ----
     const smartsheetBody = [
       {
         toBottom: true,
@@ -71,4 +74,16 @@ module.exports = async function handler(req, res) {
     );
 
     if (!response.ok) {
-      const
+      const errorText = await response.text();
+      console.error("Smartsheet API error:", errorText);
+      return res.status(500).send(errorText);
+    }
+
+    console.log("Row added successfully to Smartsheet");
+    return res.status(200).send("OK");
+
+  } catch (error) {
+    console.error("Unexpected error:", error);
+    return res.status(500).send(error.message);
+  }
+};
