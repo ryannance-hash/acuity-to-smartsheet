@@ -1,68 +1,89 @@
-import fetch from "node-fetch";
+// api/acuity.js
+import fetch from 'node-fetch';
+import Smartsheet from 'smartsheet';
 
+const smartsheet = new Smartsheet({
+  accessToken: process.env.SMARTSHEET_TOKEN
+});
+
+const SHEET_ID = process.env.SHEET_ID;
+
+// Column mapping in Smartsheet
+const COLUMN_MAP = {
+  COL_APPT_ID: 'Acuity Appt ID',
+  COL_NAME: 'Associate Name',
+  COL_EMAIL: 'Email Address',
+  COL_PHONE: 'Phone Number',
+  COL_DATE: 'OB Calendar',
+  COL_TIME: 'Appt Time',
+  COL_SERVICE: 'Acuity Appt Type',
+  COL_STATUS: 'Acuity Status'
+};
+
+// Helper: find Smartsheet column ID by title
+async function getColumnIds(sheetId) {
+  const sheet = await smartsheet.sheets.getSheet({ id: sheetId });
+  const columns = {};
+  sheet.columns.forEach(col => {
+    for (const key in COLUMN_MAP) {
+      if (col.title === COLUMN_MAP[key]) {
+        columns[key] = col.id;
+      }
+    }
+  });
+  return columns;
+}
+
+// Vercel handler
 export default async function handler(req, res) {
   try {
-    // 1️⃣ Get the webhook payload from Acuity
-    const acuityData = req.body;
-    console.log("Webhook payload from Acuity:", acuityData);
+    const payload = req.body;
 
-    // 2️⃣ Map the fields we want from Acuity
-    const rowData = {
-      "Acuity Appt ID": acuityData.id,
-      "Associate Name": `${acuityData.firstName} ${acuityData.lastName}`,
-      "Email Address": acuityData.email,
-      "Phone Number": acuityData.phone,
-      "OB Calendar": acuityData.date,
-      "Appt Time": acuityData.time,
-      "Acuity Appt Type": acuityData.type,
-      "Acuity Status": acuityData.action
-    };
+    console.log('Webhook payload from Acuity:', payload);
 
-    // 3️⃣ Get the sheet columns dynamically
-    const sheetId = process.env.SHEET_ID;
-    const smartsheetResp = await fetch(`https://api.smartsheet.com/2.0/sheets/${sheetId}`, {
-      headers: {
-        Authorization: `Bearer ${process.env.SMARTSHEET_TOKEN}`,
-        "Content-Type": "application/json"
-      }
-    });
-    const sheetData = await smartsheetResp.json();
-
-    // Build a map: column title -> column id
-    const columnMap = {};
-    sheetData.columns.forEach(col => {
-      columnMap[col.title] = col.id;
-    });
-    console.log("Column map:", columnMap);
-
-    // 4️⃣ Convert Acuity data to Smartsheet row format
-    const smartsheetRow = {
-      toTop: true,
-      cells: Object.entries(rowData).map(([title, value]) => {
-        const columnId = columnMap[title];
-        if (!columnId) {
-          console.warn(`⚠️ Column "${title}" not found on sheet`);
+    // Fetch full appointment details from Acuity
+    const acuityResponse = await fetch(
+      `https://acuityscheduling.com/api/v1/appointments/${payload.id}`,
+      {
+        headers: {
+          'Authorization': 'Basic ' + Buffer.from(`${process.env.ACUITY_KEY}:`).toString('base64')
         }
-        return { columnId, value };
-      }).filter(cell => cell.columnId) // only include cells with valid column IDs
+      }
+    );
+
+    const appointment = await acuityResponse.json();
+    console.log('Full appointment details:', appointment);
+
+    // Get current column IDs from Smartsheet
+    const columnIds = await getColumnIds(SHEET_ID);
+    console.log('Column IDs:', columnIds);
+
+    // Prepare row data
+    const newRow = {
+      toTop: true,
+      cells: [
+        { columnId: columnIds.COL_APPT_ID, value: appointment.id },
+        { columnId: columnIds.COL_NAME, value: `${appointment.firstName} ${appointment.lastName}` },
+        { columnId: columnIds.COL_EMAIL, value: appointment.email },
+        { columnId: columnIds.COL_PHONE, value: appointment.phone },
+        { columnId: columnIds.COL_DATE, value: appointment.date },
+        { columnId: columnIds.COL_TIME, value: appointment.time },
+        { columnId: columnIds.COL_SERVICE, value: appointment.type },
+        { columnId: columnIds.COL_STATUS, value: appointment.action }
+      ]
     };
 
-    // 5️⃣ Insert row into Smartsheet
-    const addRowResp = await fetch(`https://api.smartsheet.com/2.0/sheets/${sheetId}/rows`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${process.env.SMARTSHEET_TOKEN}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify([smartsheetRow])
+    // Add row to Smartsheet
+    const addedRow = await smartsheet.sheets.addRows({
+      sheetId: SHEET_ID,
+      body: [newRow]
     });
 
-    const addRowData = await addRowResp.json();
-    console.log("Smartsheet row added:", addRowData);
+    console.log('Added row to Smartsheet:', addedRow);
 
-    res.status(200).json({ success: true, data: addRowData });
-  } catch (error) {
-    console.error("Error inserting into Smartsheet:", error);
-    res.status(500).json({ success: false, error: error.message });
+    res.status(200).send('OK');
+  } catch (err) {
+    console.error('Error processing webhook:', err);
+    res.status(500).json({ error: err.message });
   }
 }
